@@ -19,7 +19,8 @@
       },
       "permissions": [
         "android.permission.RECORD_AUDIO"
-      ]
+      ],
+      "package": "com.firewallls.chat_app"
     },
     "web": {
       "favicon": "./assets/favicon.png"
@@ -39,6 +40,11 @@
           }
         }
       ]
-    ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": "e39957ba-e213-4e0f-ac96-80df704d91b6"
+      }
+    }
   }
 }

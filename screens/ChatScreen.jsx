@@ -12,6 +12,8 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
+import { fetch as expoFetch } from 'expo/fetch';
+import { File, Paths } from 'expo-file-system';
 import * as ImagePicker from 'expo-image-picker';
 import { ImageManipulator, SaveFormat } from 'expo-image-manipulator';
 import { useAuth } from '../AuthContext';
@@ -89,6 +91,59 @@ const ensureResponseOk = async (response, action) => {
 
 const SharedImage = ({ source }) => {
     const [loadFailed, setLoadFailed] = useState(false);
+    const [loading, setLoading] = useState(true);
+    const [localUri, setLocalUri] = useState(null);
+    const uri = source?.uri;
+    const authorization = source?.headers?.Authorization;
+
+    useEffect(() => {
+        let cancelled = false;
+        if (!uri || !authorization) return undefined;
+
+        const loadImage = async () => {
+            try {
+                const response = await expoFetch(uri, {
+                    headers: { Authorization: authorization },
+                });
+                if (!response.ok) {
+                    const details = await response.text();
+                    throw new Error(
+                        `Image download failed (${response.status})${details ? `: ${details}` : ''}`,
+                    );
+                }
+
+                const bytes = await response.bytes();
+                const mimeType = response.headers
+                    .get('content-type')
+                    ?.split(';', 1)[0]
+                    .toLowerCase();
+                const extension = {
+                    'image/gif': 'gif',
+                    'image/heic': 'heic',
+                    'image/jpeg': 'jpg',
+                    'image/png': 'png',
+                    'image/webp': 'webp',
+                }[mimeType] ?? 'jpg';
+                const cachedImage = new File(
+                    Paths.cache,
+                    `shared-image-${Date.now()}-${Math.random().toString(36).slice(2)}.${extension}`,
+                );
+                await cachedImage.write(bytes);
+
+                if (!cancelled) setLocalUri(cachedImage.uri);
+            } catch (error) {
+                console.error('Unable to display shared image:', error);
+                if (!cancelled) setLoadFailed(true);
+            } finally {
+                if (!cancelled) setLoading(false);
+            }
+        };
+
+        loadImage();
+        return () => {
+            cancelled = true;
+        };
+    }, [authorization, uri]);
 
     if (loadFailed) {
         return (
@@ -98,9 +153,17 @@ const SharedImage = ({ source }) => {
         );
     }
 
+    if (authorization && (loading || !localUri)) {
+        return (
+            <View style={styles.imageUnavailable}>
+                <ActivityIndicator color={colors.accent} />
+            </View>
+        );
+    }
+
     return (
         <Image
-            source={source}
+            source={{ uri: authorization ? localUri : uri }}
             accessibilityLabel="Shared image"
             style={styles.messageImage}
             resizeMode="contain"
@@ -309,14 +372,16 @@ const ChatScreen = ({ route }) => {
     };
 
     const renderMessage = ({ item }) => {
-        const imageUri = toImageUri(item.imageInfo) ?? item.file?.downloadUrl;
+        const fileDownloadUrl = item.file?.downloadUrl;
+        const imageUri = toImageUri(item.imageInfo) ?? fileDownloadUrl;
+        const isAuthenticatedDownload = imageUri === fileDownloadUrl;
         const imageSource = imageUri
             ? {
                   uri:
-                      item.file?.downloadUrl && !/^https?:/i.test(imageUri)
+                      isAuthenticatedDownload && !/^https?:/i.test(imageUri)
                           ? apiUrl(imageUri)
                           : imageUri,
-                  ...(item.file?.downloadUrl
+                  ...(isAuthenticatedDownload
                       ? { headers: { Authorization: authorization } }
                       : {}),
               }
